@@ -31,99 +31,14 @@ const bidiServerLogger: bidiLog.LoggerFn = prefix => {
   };
 };
 
-// Node < 24 does not expose DisposableStack without --harmony-explicit-resource-management.
-function ensureDisposableStackPolyfill() {
-  if ('DisposableStack' in globalThis)
-    return;
-  const disposeSymbol: symbol = (Symbol as any).dispose ??= Symbol.for('Symbol.dispose');
-  class DisposableStackPolyfill {
-    private _disposed = false;
-    private _stack: (() => void)[] = [];
-
-    get disposed() {
-      return this._disposed;
-    }
-
-    defer(onDispose: () => void): void {
-      if (this._disposed)
-        throw new ReferenceError('DisposableStack is already disposed');
-      if (typeof onDispose !== 'function')
-        throw new TypeError('onDispose is not a function');
-      this._stack.push(onDispose);
-    }
-
-    use<T>(value: T): T {
-      if (this._disposed)
-        throw new ReferenceError('DisposableStack is already disposed');
-      if (value !== null && value !== undefined) {
-        const method = (value as any)[disposeSymbol];
-        if (typeof method !== 'function')
-          throw new TypeError('Value is not disposable');
-        this._stack.push(() => method.call(value));
-      }
-      return value;
-    }
-
-    adopt<T>(value: T, onDispose: (value: T) => void): T {
-      if (this._disposed)
-        throw new ReferenceError('DisposableStack is already disposed');
-      if (typeof onDispose !== 'function')
-        throw new TypeError('onDispose is not a function');
-      this._stack.push(() => onDispose(value));
-      return value;
-    }
-
-    move(): DisposableStackPolyfill {
-      if (this._disposed)
-        throw new ReferenceError('DisposableStack is already disposed');
-      const next = new DisposableStackPolyfill();
-      next._stack = this._stack;
-      this._stack = [];
-      this._disposed = true;
-      return next;
-    }
-
-    dispose(): void {
-      if (this._disposed)
-        return;
-      this._disposed = true;
-      const stack = this._stack;
-      this._stack = [];
-      let hasError = false;
-      let error: unknown;
-      for (let i = stack.length - 1; i >= 0; i--) {
-        try {
-          stack[i]();
-        } catch (e) {
-          if (hasError) {
-            const SuppressedErr = (globalThis as any).SuppressedError;
-            error = SuppressedErr ? new SuppressedErr(e, error, 'An error was suppressed during disposal') : e;
-          } else {
-            hasError = true;
-            error = e;
-          }
-        }
-      }
-      if (hasError)
-        throw error;
-    }
-
-    [disposeSymbol](): void {
-      this.dispose();
-    }
-  }
-  (globalThis as any).DisposableStack = DisposableStackPolyfill;
-}
-
 export async function connectBidiOverCdp(cdp: ConnectionTransport): Promise<ConnectionTransport> {
-  ensureDisposableStackPolyfill();
   // chromium-bidi is not in our dependencies. Bundlers do not fail on a
-  // missing module if its import() is inside a try block.
+  // missing module if its require() is inside a try block.
   let bidiMapperModule: typeof bidiMapper;
   let bidiCdpConnectionModule: typeof bidiCdpConnection;
   try {
-    bidiMapperModule = await import('chromium-bidi/out/Default/gen/src/bidiMapper/BidiMapper.js');
-    bidiCdpConnectionModule = await import('chromium-bidi/out/Default/gen/src/cdp/CdpConnection.js');
+    bidiMapperModule = require('chromium-bidi/out/Default/gen/src/bidiMapper/BidiMapper.js');
+    bidiCdpConnectionModule = require('chromium-bidi/out/Default/gen/src/cdp/CdpConnection.js');
   } catch (error) {
     throw error;
   }
